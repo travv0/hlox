@@ -4,12 +4,15 @@ module Scanner
 
 import           Control.Monad                  ( when )
 import           Control.Monad.State            ( StateT
-                                                , evalStateT
                                                 , get
                                                 , gets
+                                                , liftIO
                                                 , modify'
+                                                , runStateT
                                                 )
-import           Data.Bifunctor                 ( bimap )
+import           Data.Bifunctor                 ( bimap
+                                                , second
+                                                )
 import           Data.Char                      ( isAlpha
                                                 , isAlphaNum
                                                 , isDigit
@@ -18,19 +21,23 @@ import           Data.Foldable                  ( Foldable(foldl') )
 import           Data.Map                       ( Map )
 import qualified Data.Map                      as Map
 import           Data.Maybe                     ( fromMaybe )
+import           System.IO                      ( hPutStrLn
+                                                , stderr
+                                                )
 import           Token
 
 type Scanner = StateT ScannerState IO
 
 data ScannerState = ScannerState
-    { scannerSource :: String
-    , scannerLine   :: Int
-    , scannerTokens :: [Token]
+    { scannerSource  :: String
+    , scannerLine    :: Int
+    , scannerTokens  :: [Token]
+    , scannerErrored :: Bool
     }
     deriving Show
 
-scan :: String -> IO [Token]
-scan input = evalStateT scanTokens $ make input
+scan :: String -> IO ([Token], Bool)
+scan input = second scannerErrored <$> runStateT scanTokens (make input)
 
 scanTokens :: Scanner [Token]
 scanTokens = do
@@ -61,8 +68,16 @@ keywords = Map.fromList
     ]
 
 make :: String -> ScannerState
-make source =
-    ScannerState { scannerSource = source, scannerLine = 1, scannerTokens = [] }
+make source = ScannerState { scannerSource  = source
+                           , scannerLine    = 1
+                           , scannerTokens  = []
+                           , scannerErrored = False
+                           }
+
+reportError :: Int -> String -> Scanner ()
+reportError line message = do
+    liftIO $ hPutStrLn stderr $ "[line " <> show line <> "] Error: " <> message
+    modify' (\s -> s { scannerErrored = True })
 
 addToken :: TokenType -> String -> Int -> Scanner ()
 addToken token lexeme line = do
@@ -120,8 +135,9 @@ scanIdentifier first = do
 
 consume :: Char -> String -> Scanner ()
 consume char message = do
-    c <- scanOne
-    when (c /= Just char) $ error message
+    line <- gets scannerLine
+    c    <- scanOne
+    when (c /= Just char) $ reportError line message
 
 scanNumber :: Char -> Scanner ()
 scanNumber first = do
@@ -183,8 +199,6 @@ scanToken = do
         (Just d, _) | isDigit d             -> scanNumber d
         (Just a, _) | isAlpha a || a == '_' -> scanIdentifier a
 
-        (Just u, _)                         -> do
-            error $ "Unexpected character: '" <> [u] <> "'"
-            -- reportError (line, "Unexpected character: '" <> [c] <> "'")
-            -- scanner { scannerSource = source }
+        (Just u, _) ->
+            reportError line $ "Unexpected character: '" <> [u] <> "'"
         (Nothing, _) -> error "Unexpected end of file"
