@@ -33,7 +33,7 @@ data TokenType
     | And
     | Class
     | Else
-    | False
+    | False_
     | Fun
     | For
     | If
@@ -43,17 +43,19 @@ data TokenType
     | Return
     | Super
     | This
-    | True
+    | True_
     | Var
     | While
 
     | Eof
+    deriving Show
 
 data Token = Token
     { tokenType   :: TokenType
     , tokenLexeme :: String
     , tokenLine   :: Int
     }
+    deriving Show
 
 eof :: Int -> Token
 eof line = Token { tokenType = Eof, tokenLexeme = "", tokenLine = line }
