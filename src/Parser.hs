@@ -321,17 +321,16 @@ factor = binary unary [Slash, Star]
 primary :: Parser Expr
 primary = do
     token <- parseOne
-    case token of
-        Token { tokenType = False_ } -> pure . ExprLiteral $ LiteralBool False
-        Token { tokenType = True_ } -> pure . ExprLiteral $ LiteralBool True
-        Token { tokenType = Nil } -> pure $ ExprLiteral LiteralNil
-        Token { tokenType = String s } -> pure . ExprLiteral $ LiteralString s
-        Token { tokenType = Number n } -> pure . ExprLiteral $ LiteralNumber n
-        Token { tokenType = Identifier } -> pure $ ExprVariable token
-        Token { tokenType = LeftParen } ->
-            ExprGrouping <$> expression <* consume
-                RightParen
-                "Expect ')' after expression."
+    case tokenType token of
+        False_     -> pure . ExprLiteral $ LiteralBool False
+        True_      -> pure . ExprLiteral $ LiteralBool True
+        Nil        -> pure $ ExprLiteral LiteralNil
+        String s   -> pure . ExprLiteral $ LiteralString s
+        Number n   -> pure . ExprLiteral $ LiteralNumber n
+        Identifier -> pure $ ExprVariable token
+        LeftParen  -> ExprGrouping <$> expression <* consume
+            RightParen
+            "Expect ')' after expression."
         _ -> throwError (Just token) "Expect expression."
 
 peek :: Parser Token
