@@ -123,7 +123,7 @@ statement = do
         For       -> parseOne *> forStatement
         If        -> parseOne *> ifStatement
         While     -> parseOne *> whileStatement
-        Return    -> returnStatement
+        Return    -> parseOne *> returnStatement
         Print     -> parseOne *> printStatement
         LeftBrace -> parseOne *> block
         _         -> expressionStatement
@@ -143,14 +143,13 @@ block = StmtBlock <$> go
 
 returnStatement :: Parser Stmt
 returnStatement = do
-    ret  <- parseOne
     next <- peek
     case tokenType next of
-        Semicolon -> parseOne $> StmtReturn ret Nothing
+        Semicolon -> parseOne $> StmtReturn Nothing
         _         -> do
             expr <- expression
                 <* consume Semicolon "Expect ';' after return statement."
-            pure . StmtReturn ret $ Just expr
+            pure . StmtReturn $ Just expr
 
 ifStatement :: Parser Stmt
 ifStatement = do

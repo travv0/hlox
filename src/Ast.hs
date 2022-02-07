@@ -1,15 +1,19 @@
 module Ast where
 
+import           Data.IORef                     ( IORef )
+import           Data.Map                       ( Map )
 import           Data.Maybe                     ( fromMaybe )
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
 import           Token
 
+type Environment = [Map Text (IORef Literal)]
+
 data Literal
     = LiteralBool Bool
     | LiteralString Text
     | LiteralNumber Double
-    | LiteralFunction Text Int ([Literal] -> IO Literal)
+    | LiteralFunction Text Int Environment ([Literal] -> Environment -> IO Literal)
     | LiteralNil
 
 instance Eq Literal where
@@ -27,12 +31,12 @@ prettyLiteral (LiteralNumber n) =
 prettyLiteral l = T.pack $ show l
 
 instance Show Literal where
-    show (LiteralBool   True      ) = "true"
-    show (LiteralBool   False     ) = "false"
-    show (LiteralString s         ) = show s
-    show (LiteralNumber n         ) = show n
-    show (LiteralFunction name _ _) = "<fn " <> T.unpack name <> ">"
-    show LiteralNil                 = "nil"
+    show (LiteralBool   True        ) = "true"
+    show (LiteralBool   False       ) = "false"
+    show (LiteralString s           ) = show s
+    show (LiteralNumber n           ) = show n
+    show (LiteralFunction name _ _ _) = "<fn " <> T.unpack name <> ">"
+    show LiteralNil                   = "nil"
 
 data BinaryOp
     = BinaryPlus
@@ -87,7 +91,7 @@ data Stmt
     | StmtFunction Token [Token] Stmt
     | StmtIf Expr Stmt (Maybe Stmt)
     | StmtPrint Expr
-    | StmtReturn Token (Maybe Expr)
+    | StmtReturn (Maybe Expr)
     | StmtVar Token (Maybe Expr)
     | StmtWhile Expr Stmt
     | StmtBlock [Stmt]

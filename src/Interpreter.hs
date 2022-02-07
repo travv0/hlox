@@ -1,11 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Interpreter
     ( interpret
     ) where
 
 import           Ast
-import           Control.Monad                  ( when )
+import           Control.Exception              ( throw )
+import           Control.Monad                  ( when
+                                                , zipWithM_
+                                                )
+import           Control.Monad.Catch            ( Exception
+                                                , catch
+                                                )
 import           Control.Monad.Except           ( ExceptT
                                                 , lift
                                                 , runExceptT
@@ -21,8 +28,10 @@ import           Data.Foldable                  ( for_
                                                 , traverse_
                                                 )
 import           Data.Functor                   ( ($>) )
-import           Data.IORef
-import           Data.Map                       ( Map )
+import           Data.IORef                     ( newIORef
+                                                , readIORef
+                                                , writeIORef
+                                                )
 import qualified Data.Map                      as Map
 import           Data.Text                      ( Text )
 import qualified Data.Text                     as T
@@ -35,8 +44,6 @@ import           System.IO                      ( stderr )
 import           Token
 
 type Interpreter = StateT InterpreterState (ExceptT [InterpretError] IO)
-
-type Environment = [Map Text (IORef Literal)]
 
 data InterpreterState = InterpreterState
     { interpreterErrors :: [InterpretError]
@@ -55,6 +62,9 @@ data InterpretError
     | InterpretOtherError Text Int
     deriving Show
 
+instance Exception InterpretError
+instance Exception [InterpretError]
+
 reportInterpretError :: InterpretError -> IO ()
 reportInterpretError (InterpretTypeError TypeError { typeErrorExpected, typeErrorValue, typeErrorLine })
     = hPutStrLn stderr
@@ -70,17 +80,25 @@ reportInterpretError (InterpretOtherError message line) =
 
 interpret :: [Stmt] -> IO ()
 interpret statements = do
-    result <- runInterpreter $ do
-        defineGlobal "clock" clock
-        traverse_ execute statements
+    result <- runInterpreter
+        (do
+            defineGlobal "clock" clock
+            traverse_ execute statements
+        )
+        [Map.empty]
     case result of
         Right _    -> pure ()
         Left  errs -> for_ errs reportInterpretError
 
-runInterpreter :: Interpreter a -> IO (Either [InterpretError] a)
-runInterpreter interpreter = runExceptT $ evalStateT
+runInterpreter
+    :: Interpreter a -> Environment -> IO (Either [InterpretError] a)
+runInterpreter interpreter env = runExceptT $ evalStateT
     interpreter
-    (InterpreterState { interpreterErrors = [], interpreterEnv = [Map.empty] })
+    (InterpreterState { interpreterErrors = [], interpreterEnv = env })
+
+newtype ReturnExn = ReturnExn Literal deriving Show
+
+instance Exception ReturnExn
 
 execute :: Stmt -> Interpreter ()
 execute (StmtExpression expr      ) = evaluate expr >> pure ()
@@ -91,14 +109,37 @@ execute (StmtBlock      statements) = do
 execute (StmtPrint expr) = do
     v <- evaluate expr
     liftIO . putStrLn $ prettyLiteral v
-execute StmtFunction{}                   = undefined
+execute (StmtFunction token params body) = do
+    defineVar token undefined
+    env <- gets interpreterEnv
+    _   <- assignVar
+        token
+        (LiteralFunction (tokenLexeme token) (length params) env callFn)
+    pure ()
+  where
+    callFn :: [Literal] -> Environment -> IO Literal
+    callFn args env = do
+        let newEnv = Map.empty : env
+        result <- runInterpreter
+            (do
+                zipWithM_ defineVar params args
+                (execute body $> LiteralNil) `catch` \(ReturnExn v) -> pure v
+            )
+            newEnv
+        case result of
+            Left  errs -> throw errs
+            Right r    -> pure r
 execute (StmtIf cond thenBranch Nothing) = do
     c <- evaluate cond
     when (isTruthy c) $ execute thenBranch
 execute (StmtIf cond thenBranch (Just elseBranch)) = do
     c <- evaluate cond
     if isTruthy c then execute thenBranch else execute elseBranch
-execute StmtReturn{}                = undefined
+execute (StmtReturn (Just expr)) = do
+    value <- evaluate expr
+    throw (ReturnExn value)
+execute (StmtReturn Nothing) = do
+    throw (ReturnExn LiteralNil)
 execute (StmtVar token (Just expr)) = do
     value <- evaluate expr
     defineVar token value
@@ -112,9 +153,14 @@ execute (StmtWhile cond body) = go
             execute body
             go
 
-clock :: Text -> Literal
-clock name =
-    LiteralFunction name 0 (\[] -> LiteralNumber . realToFrac <$> getPOSIXTime)
+clock :: Text -> Interpreter Literal
+clock name = do
+    env <- gets interpreterEnv
+    pure $ LiteralFunction
+        name
+        0
+        env
+        (\[] _ -> LiteralNumber . realToFrac <$> getPOSIXTime)
 
 evaluate :: Expr -> Interpreter Literal
 evaluate (ExprAssign token expr) = do
@@ -186,7 +232,7 @@ evaluate (ExprBinary left (Token { tokenLine }, op) right) = do
 evaluate (ExprCall callee token argExprs) = do
     fn   <- evaluate callee
     args <- traverse evaluate argExprs
-    call token fn args
+    call token fn args `catch` \errs -> throwErrors errs
 
 evaluate (ExprLogical leftExpr (_, LogicalAnd) rightExpr) = do
     left <- evaluate leftExpr
@@ -230,10 +276,45 @@ throwError message line = do
     errors <- gets interpreterErrors
     lift . throwE $ reverse errors
 
+throwErrors :: [InterpretError] -> Interpreter a
+throwErrors errs = do
+    errors <- gets interpreterErrors
+    lift . throwE $ reverse errors <> errs
+
 isTruthy :: Literal -> Bool
 isTruthy LiteralNil      = False
 isTruthy (LiteralBool b) = b
 isTruthy _               = True
+
+call :: Token -> Literal -> [Literal] -> Interpreter Literal
+call _ (LiteralFunction _ arity env fn) args | length args == arity =
+    liftIO $ fn args env
+call Token { tokenLine } (LiteralFunction _ arity _ _) args = throwError
+    (  "Expected "
+    <> T.pack (show arity)
+    <> " arguments but got "
+    <> T.pack (show (length args))
+    <> "."
+    )
+    tokenLine
+call Token { tokenLine } literal _ = typeError "function" literal tokenLine
+
+defineGlobal :: Text -> (Text -> Interpreter Literal) -> Interpreter ()
+defineGlobal name fn = do
+    env <- gets interpreterEnv
+    go [] env
+  where
+    go _    []    = error "No environment"
+    go seen [env] = do
+        valueRef <- liftIO . newIORef =<< fn name
+        modify'
+            (\s -> do
+                s
+                    { interpreterEnv = Map.insert name valueRef env
+                                           : reverse seen
+                    }
+            )
+    go seen (env : envs) = go (env : seen) envs
 
 pushEnv :: Interpreter ()
 pushEnv = modify' (\s -> s { interpreterEnv = Map.empty : interpreterEnv s })
@@ -274,33 +355,3 @@ assignVar Token { tokenLexeme, tokenLine } value = do
     go (env : envs) = case Map.lookup tokenLexeme env of
         Just valueRef -> liftIO $ writeIORef valueRef value $> value
         Nothing       -> go envs
-
-call :: Token -> Literal -> [Literal] -> Interpreter Literal
-call _ (LiteralFunction _ arity fn) args | length args == arity =
-    liftIO $ fn args
-call Token { tokenLine } (LiteralFunction _ arity _) args = throwError
-    (  "Expected "
-    <> T.pack (show arity)
-    <> " arguments but got "
-    <> T.pack (show (length args))
-    <> "."
-    )
-    tokenLine
-call Token { tokenLine } literal _ = typeError "function" literal tokenLine
-
-defineGlobal :: Text -> (Text -> Literal) -> Interpreter ()
-defineGlobal name fn = do
-    env <- gets interpreterEnv
-    go [] env
-  where
-    go _    []    = error "No environment"
-    go seen [env] = do
-        valueRef <- liftIO . newIORef $ fn name
-        modify'
-            (\s -> do
-                s
-                    { interpreterEnv = Map.insert name valueRef env
-                                           : reverse seen
-                    }
-            )
-    go seen (env : envs) = go (env : seen) envs
