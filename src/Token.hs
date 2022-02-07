@@ -48,7 +48,7 @@ data TokenType
     | While
 
     | Eof
-    deriving Show
+    deriving (Show, Eq)
 
 data Token = Token
     { tokenType   :: TokenType

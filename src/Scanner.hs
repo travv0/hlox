@@ -54,8 +54,8 @@ scanTokens = do
     ScannerState { scannerSource = source, scannerTokens = tokens, scannerLine = line } <-
         get
     case source of
-        [] -> return . reverse $ eof line : tokens
-        _  -> scanToken >> scanTokens
+        [] -> pure . reverse $ eof line : tokens
+        _  -> scanToken *> scanTokens
 
 keywords :: Map [Char] TokenType
 keywords = Map.fromList
@@ -127,8 +127,8 @@ scanOne = do
                                           else scannerLine s
                     }
                 )
-            return $ Just c
-        _ -> return Nothing
+            pure $ Just c
+        _ -> pure Nothing
 
 scanWhile :: (Char -> Bool) -> Scanner String
 scanWhile f = do
@@ -139,7 +139,7 @@ scanWhile f = do
                  , scannerLine   = scannerLine s + length (filter (== '\n') cs)
                  }
         )
-    return cs
+    pure cs
 
 scanIdentifier :: Char -> Scanner ()
 scanIdentifier first = do
@@ -163,8 +163,8 @@ scanNumber first = do
         '.' : c : _ | isDigit c -> do
             consume '.' "Failed to consume '.' in number."
             cs <- scanWhile isDigit
-            return $ num ++ '.' : cs
-        _ -> return num
+            pure $ num ++ '.' : cs
+        _ -> pure num
     addToken (Number (read number)) number line
 
 scanString :: Scanner ()
@@ -204,10 +204,10 @@ scanToken = do
         (Just '/'   , '/' : _   )           -> comment
         (Just c1@'/', _         )           -> addToken Slash [c1] line
 
-        (Just ' '   , _         )           -> return ()
-        (Just '\r'  , _         )           -> return ()
-        (Just '\t'  , _         )           -> return ()
-        (Just '\n'  , _         )           -> return ()
+        (Just ' '   , _         )           -> pure ()
+        (Just '\r'  , _         )           -> pure ()
+        (Just '\t'  , _         )           -> pure ()
+        (Just '\n'  , _         )           -> pure ()
 
         (Just '"'   , _         )           -> scanString
 

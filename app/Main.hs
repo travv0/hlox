@@ -2,7 +2,7 @@ module Main where
 
 import           Control.Monad.Catch            ( catchIf )
 import           Data.Foldable                  ( for_ )
-import           Scanner
+import Scanner ( scan, reportScanError )
 import           System.Environment             ( getArgs )
 import           System.Exit                    ( ExitCode(..)
                                                 , exitWith
@@ -13,6 +13,8 @@ import           System.IO                      ( hFlush
                                                 , stdout
                                                 )
 import           System.IO.Error                ( isEOFError )
+import Parser (parse, reportParseError)
+import Interpreter (interpret)
 
 main :: IO ()
 main = do
@@ -29,11 +31,15 @@ run source = do
     let (tokens, scanErrors) = scan source
     for_ scanErrors reportScanError
 
-    print tokens
-
-    if not (null scanErrors)
-        then return $ ExitFailure 65
-        else return ExitSuccess
+    case parse tokens of
+      Left errors -> do
+        for_ errors reportParseError
+        pure $ ExitFailure 65
+      Right ast -> do
+        interpret ast
+        if not (null scanErrors)
+            then pure $ ExitFailure 65
+            else pure ExitSuccess
 
 runFile :: FilePath -> IO a
 runFile path = do
@@ -44,8 +50,8 @@ getLineMaybe = catchIf isEOFError (Just <$> getLine) (const (pure Nothing))
 
 runPrompt :: IO ()
 runPrompt = do
-    putStr "> " >> hFlush stdout
+    putStr "> " *> hFlush stdout
     mline <- getLineMaybe
     case mline of
-        Just line -> run line >> runPrompt
-        Nothing   -> return ()
+        Just line -> run line *> runPrompt
+        Nothing   -> pure ()
