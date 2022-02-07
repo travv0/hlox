@@ -40,8 +40,7 @@ run source = do
             for_ errors reportParseError
             pure $ ExitFailure 65
         Right ast -> do
-            print ast
-            -- interpret ast
+            interpret ast
             if not (null scanErrors)
                 then pure $ ExitFailure 65
                 else pure ExitSuccess

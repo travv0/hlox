@@ -17,10 +17,14 @@ instance Eq Literal where
     LiteralNil == LiteralNil = True
     _ == _ = False
 
+prettyLiteral :: Literal -> String
+prettyLiteral (LiteralString s) = s
+prettyLiteral l                 = show l
+
 instance Show Literal where
     show (LiteralBool   True      ) = "true"
     show (LiteralBool   False     ) = "false"
-    show (LiteralString s         ) = s
+    show (LiteralString s         ) = show s
     show (LiteralNumber n         ) = show n
     show (LiteralFunction name _ _) = name
     show LiteralNil                 = "nil"
