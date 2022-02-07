@@ -36,8 +36,12 @@ parse = runParser go
     go = do
         next <- peek
         case tokenType next of
-            Eof -> pure []
-            _   -> do
+            Eof -> do
+                errors <- gets parserErrors
+                case errors of
+                    [] -> pure []
+                    _  -> lift $ throwE errors
+            _ -> do
                 stmt <- declaration
                 (stmt :) <$> go
 

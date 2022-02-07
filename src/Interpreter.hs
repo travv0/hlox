@@ -7,7 +7,8 @@ module Interpreter
 
 import           Ast
 import           Control.Exception              ( throw )
-import           Control.Monad                  ( when
+import           Control.Monad                  ( unless
+                                                , when
                                                 , zipWithM_
                                                 )
 import           Control.Monad.Catch            ( Exception
@@ -84,6 +85,8 @@ interpret statements = do
         (do
             defineGlobal "clock" clock
             traverse_ execute statements
+            errors <- gets interpreterErrors
+            unless (null errors) $ lift $ throwE errors
         )
         [Map.empty]
     case result of
