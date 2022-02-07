@@ -1,4 +1,5 @@
 module Token where
+import           Data.Text                      ( Text )
 
 data TokenType
     -- Single-character tokens.
@@ -26,7 +27,7 @@ data TokenType
 
     -- Literals.
     | Identifier
-    | String String
+    | String Text
     | Number Double
 
     -- Keywords.
@@ -52,7 +53,7 @@ data TokenType
 
 data Token = Token
     { tokenType   :: TokenType
-    , tokenLexeme :: String
+    , tokenLexeme :: Text
     , tokenLine   :: Int
     }
     deriving Show

@@ -21,33 +21,38 @@ import           Data.Foldable                  ( Foldable(foldl') )
 import           Data.Map                       ( Map )
 import qualified Data.Map                      as Map
 import           Data.Maybe                     ( fromMaybe )
-import           System.IO                      ( hPutStrLn
-                                                , stderr
-                                                )
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
+import           Data.Text.IO                   ( hPutStrLn )
+import           System.IO                      ( stderr )
 import           Token
 
 type Scanner = State ScannerState
 
 data ScanError = ScanError
     { scanErrorLine    :: Int
-    , scanErrorMessage :: String
+    , scanErrorMessage :: Text
     }
     deriving Show
 
 data ScannerState = ScannerState
-    { scannerSource :: String
+    { scannerSource :: [Char]
     , scannerLine   :: Int
     , scannerTokens :: [Token]
     , scannerErrors :: [ScanError]
     }
     deriving Show
 
-scan :: String -> ([Token], [ScanError])
+scan :: [Char] -> ([Token], [ScanError])
 scan = second (reverse . scannerErrors) . runState scanTokens . make
 
 reportScanError :: ScanError -> IO ()
 reportScanError ScanError { scanErrorLine = line, scanErrorMessage = message }
-    = hPutStrLn stderr $ "[line " <> show line <> "] Error: " <> message
+    = hPutStrLn stderr
+        $  "[line "
+        <> T.pack (show line)
+        <> "] Error: "
+        <> message
 
 scanTokens :: Scanner [Token]
 scanTokens = do
@@ -77,14 +82,14 @@ keywords = Map.fromList
     , ("while" , While)
     ]
 
-make :: String -> ScannerState
+make :: [Char] -> ScannerState
 make source = ScannerState { scannerSource = source
                            , scannerLine   = 1
                            , scannerTokens = []
                            , scannerErrors = []
                            }
 
-scanError :: Int -> String -> Scanner ()
+scanError :: Int -> Text -> Scanner ()
 scanError line message = do
     modify'
         (\s -> s
@@ -94,7 +99,7 @@ scanError line message = do
             }
         )
 
-addToken :: TokenType -> String -> Int -> Scanner ()
+addToken :: TokenType -> Text -> Int -> Scanner ()
 addToken token lexeme line = do
     modify'
         (\s -> s
@@ -130,7 +135,7 @@ scanOne = do
             pure $ Just c
         _ -> pure Nothing
 
-scanWhile :: (Char -> Bool) -> Scanner String
+scanWhile :: (Char -> Bool) -> Scanner [Char]
 scanWhile f = do
     source <- gets scannerSource
     let (cs, rest) = splitWhile f source
@@ -146,9 +151,9 @@ scanIdentifier first = do
     line  <- gets scannerLine
     ident <- (first :) <$> scanWhile (\c -> c == '_' || isAlphaNum c)
     let type_ = fromMaybe Identifier (Map.lookup ident keywords)
-    addToken type_ ident line
+    addToken type_ (T.pack ident) line
 
-consume :: Char -> String -> Scanner ()
+consume :: Char -> Text -> Scanner ()
 consume char message = do
     line <- gets scannerLine
     c    <- scanOne
@@ -165,12 +170,12 @@ scanNumber first = do
             cs <- scanWhile isDigit
             pure $ num ++ '.' : cs
         _ -> pure num
-    addToken (Number (read number)) number line
+    addToken (Number (read number)) (T.pack number) line
 
 scanString :: Scanner ()
 scanString = do
     line <- gets scannerLine
-    str  <- scanWhile (/= '"') <* consume '"' "Unterminated string."
+    str  <- T.pack <$> scanWhile (/= '"') <* consume '"' "Unterminated string."
     addToken (String str) str line
 
 comment :: Scanner ()
@@ -183,40 +188,37 @@ scanToken = do
     c      <- scanOne
     source <- gets scannerSource
     case (c, source) of
-        (Just c1@'(', _) -> addToken LeftParen [c1] line
-        (Just c1@')', _) -> addToken RightParen [c1] line
-        (Just c1@'{', _) -> addToken LeftBrace [c1] line
-        (Just c1@'}', _) -> addToken RightBrace [c1] line
-        (Just c1@',', _) -> addToken Comma [c1] line
-        (Just c1@'.', _) -> addToken Dot [c1] line
-        (Just c1@'-', _) -> addToken Minus [c1] line
-        (Just c1@'+', _) -> addToken Plus [c1] line
-        (Just c1@';', _) -> addToken Semicolon [c1] line
-        (Just c1@'*', _) -> addToken Star [c1] line
-        (Just c1@'!', c2@'=' : _) ->
-            scanOne *> addToken BangEqual [c1, c2] line
-        (Just c1@'!', _) -> addToken Bang [c1] line
-        (Just c1@'=', c2@'=' : _) ->
-            scanOne *> addToken EqualEqual [c1, c2] line
-        (Just c1@'=', _) -> addToken Equal [c1] line
-        (Just c1@'<', c2@'=' : _) ->
-            scanOne *> addToken LessEqual [c1, c2] line
-        (Just c1@'<', _) -> addToken Less [c1] line
-        (Just c1@'>', c2@'=' : _) ->
-            scanOne *> addToken GreaterEqual [c1, c2] line
-        (Just c1@'>', _      )              -> addToken Greater [c1] line
-        (Just '/'   , '/' : _)              -> comment
-        (Just c1@'/', _      )              -> addToken Slash [c1] line
+        (Just '(' , _      )                -> addToken LeftParen "(" line
+        (Just ')' , _      )                -> addToken RightParen ")" line
+        (Just '{' , _      )                -> addToken LeftBrace "{" line
+        (Just '}' , _      )                -> addToken RightBrace "}" line
+        (Just ',' , _      )                -> addToken Comma "," line
+        (Just '.' , _      )                -> addToken Dot "." line
+        (Just '-' , _      )                -> addToken Minus "-" line
+        (Just '+' , _      )                -> addToken Plus "+" line
+        (Just ';' , _      )                -> addToken Semicolon ";" line
+        (Just '*' , _      )                -> addToken Star "*" line
+        (Just '!', '=' : _) -> scanOne *> addToken BangEqual "!=" line
+        (Just '!' , _      )                -> addToken Bang "!" line
+        (Just '=', '=' : _) -> scanOne *> addToken EqualEqual "==" line
+        (Just '=' , _      )                -> addToken Equal "=" line
+        (Just '<', '=' : _) -> scanOne *> addToken LessEqual "<=" line
+        (Just '<' , _      )                -> addToken Less "<" line
+        (Just '>', '=' : _) -> scanOne *> addToken GreaterEqual ">=" line
+        (Just '>' , _      )                -> addToken Greater ">" line
+        (Just '/' , '/' : _)                -> comment
+        (Just '/' , _      )                -> addToken Slash "/" line
 
-        (Just ' '   , _      )              -> pure ()
-        (Just '\r'  , _      )              -> pure ()
-        (Just '\t'  , _      )              -> pure ()
-        (Just '\n'  , _      )              -> pure ()
+        (Just ' ' , _      )                -> pure ()
+        (Just '\r', _      )                -> pure ()
+        (Just '\t', _      )                -> pure ()
+        (Just '\n', _      )                -> pure ()
 
-        (Just '"'   , _      )              -> scanString
+        (Just '"' , _      )                -> scanString
 
         (Just d, _) | isDigit d             -> scanNumber d
         (Just a, _) | isAlpha a || a == '_' -> scanIdentifier a
 
-        (Just u, _) -> scanError line $ "Unexpected character: '" <> [u] <> "'"
-        (Nothing, _)                        -> error "Unexpected end of file"
+        (Just u, _) ->
+            scanError line $ "Unexpected character: '" <> T.pack [u] <> "'"
+        (Nothing, _) -> error "Unexpected end of file"

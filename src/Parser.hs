@@ -1,5 +1,3 @@
-{-# LANGUAGE NamedFieldPuns #-}
-
 module Parser
     ( parse
     , reportParseError
@@ -18,9 +16,10 @@ import           Control.Monad.State            ( StateT
                                                 )
 import           Control.Monad.Trans.Except     ( throwE )
 import           Data.Functor                   ( ($>) )
-import           System.IO                      ( hPutStrLn
-                                                , stderr
-                                                )
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
+import           Data.Text.IO                   ( hPutStrLn )
+import           System.IO                      ( stderr )
 import           Token
 
 type Parser = StateT ParserState (Except [ParseError])
@@ -50,7 +49,7 @@ data ParserState = ParserState
 
 data ParseError = ParseError
     { parseErrorToken   :: Maybe Token
-    , parseErrorMessage :: String
+    , parseErrorMessage :: Text
     }
     deriving Show
 
@@ -58,13 +57,13 @@ reportParseError :: ParseError -> IO ()
 reportParseError ParseError { parseErrorToken = Just Token { tokenType = Eof, tokenLine }, parseErrorMessage = message }
     = hPutStrLn stderr
         $  "[line "
-        <> show tokenLine
+        <> T.pack (show tokenLine)
         <> "] Error at end: "
         <> message
 reportParseError ParseError { parseErrorToken = Just Token { tokenLexeme, tokenLine }, parseErrorMessage = message }
     = hPutStrLn stderr
         $  "[line "
-        <> show tokenLine
+        <> T.pack (show tokenLine)
         <> "] Error at '"
         <> tokenLexeme
         <> "': "
@@ -90,7 +89,7 @@ varDeclaration = do
     consume Semicolon "Expect ';' after variable declaration."
     pure $ StmtVar identifier value
 
-funDeclaration :: String -> Parser Stmt
+funDeclaration :: Text -> Parser Stmt
 funDeclaration kind = do
     identifier <- match [Identifier] $ "Expect " <> kind <> " name."
     consume LeftParen $ "Expect '(' after " <> kind <> " name."
@@ -352,7 +351,7 @@ parseOne = do
             pure token
         _ -> throwError Nothing "Unexpected end of file."
 
-match :: [TokenType] -> String -> Parser Token
+match :: [TokenType] -> Text -> Parser Token
 match types message = do
     token <- peek
     if tokenType token `elem` types
@@ -364,12 +363,12 @@ tryMatch types = do
     token <- peek
     if tokenType token `elem` types then Just <$> parseOne else pure Nothing
 
-consume :: TokenType -> String -> Parser ()
+consume :: TokenType -> Text -> Parser ()
 consume type_ message = do
     token <- parseOne
     when (tokenType token /= type_) $ throwError (Just token) message
 
-logError :: Maybe Token -> String -> Parser ()
+logError :: Maybe Token -> Text -> Parser ()
 logError token message = modify'
     (\s -> s
         { parserErrors = ParseError { parseErrorToken   = token
@@ -379,7 +378,7 @@ logError token message = modify'
         }
     )
 
-throwError :: Maybe Token -> String -> Parser a
+throwError :: Maybe Token -> Text -> Parser a
 throwError token message = do
     logError token message
     errors <- gets parserErrors

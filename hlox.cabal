@@ -31,10 +31,13 @@ library
       , Parser
       , Scanner
       , Token
+    default-extensions: OverloadedStrings, LambdaCase, NamedFieldPuns
     build-depends:
         base >=4.7 && <5
       , containers
       , mtl
+      , text
+      , time
       , transformers
     default-language: Haskell2010
 

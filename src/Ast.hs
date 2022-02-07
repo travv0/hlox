@@ -1,12 +1,15 @@
 module Ast where
 
+import           Data.Maybe                     ( fromMaybe )
+import           Data.Text                      ( Text )
+import qualified Data.Text                     as T
 import           Token
 
 data Literal
     = LiteralBool Bool
-    | LiteralString String
+    | LiteralString Text
     | LiteralNumber Double
-    | LiteralFunction String Int ([Literal] -> Literal)
+    | LiteralFunction Text Int ([Literal] -> IO Literal)
     | LiteralNil
 
 instance Eq Literal where
@@ -17,16 +20,18 @@ instance Eq Literal where
     LiteralNil == LiteralNil = True
     _ == _ = False
 
-prettyLiteral :: Literal -> String
+prettyLiteral :: Literal -> Text
 prettyLiteral (LiteralString s) = s
-prettyLiteral l                 = show l
+prettyLiteral (LiteralNumber n) =
+    let num = T.pack $ show n in fromMaybe num . T.stripSuffix ".0" $ num
+prettyLiteral l = T.pack $ show l
 
 instance Show Literal where
     show (LiteralBool   True      ) = "true"
     show (LiteralBool   False     ) = "false"
     show (LiteralString s         ) = show s
     show (LiteralNumber n         ) = show n
-    show (LiteralFunction name _ _) = name
+    show (LiteralFunction name _ _) = "<fn " <> T.unpack name <> ">"
     show LiteralNil                 = "nil"
 
 data BinaryOp
