@@ -17,6 +17,7 @@ import           Control.Monad.State            ( StateT
                                                 , modify'
                                                 )
 import           Control.Monad.Trans.Except     ( throwE )
+import           Data.Functor                   ( ($>) )
 import           System.IO                      ( hPutStrLn
                                                 , stderr
                                                 )
@@ -30,15 +31,16 @@ make tokens = ParserState { parserTokens = tokens, parserErrors = [] }
 runParser :: Parser a -> [Token] -> Either [ParseError] a
 runParser parser = runExcept . evalStateT parser . make
 
-parse :: [Token] -> Either [ParseError] Expr
-parse = runParser expression
-
--- parse :: [Token] -> Either [ParseError] [Stmt]
--- parse = runParser go
---   where
---     go = do
---         stmt <- declaration
---         (stmt :) <$> go
+parse :: [Token] -> Either [ParseError] [Stmt]
+parse = runParser go
+  where
+    go = do
+        next <- peek
+        case tokenType next of
+            Eof -> pure []
+            _   -> do
+                stmt <- declaration
+                (stmt :) <$> go
 
 data ParserState = ParserState
     { parserTokens :: [Token]
@@ -53,7 +55,7 @@ data ParseError = ParseError
     deriving Show
 
 reportParseError :: ParseError -> IO ()
-reportParseError ParseError { parseErrorToken = Just Token { tokenType = Eof, tokenLexeme, tokenLine }, parseErrorMessage = message }
+reportParseError ParseError { parseErrorToken = Just Token { tokenType = Eof, tokenLine }, parseErrorMessage = message }
     = hPutStrLn stderr
         $  "[line "
         <> show tokenLine
@@ -74,50 +76,46 @@ declaration :: Parser Stmt
 declaration = do
     token <- peek
     case tokenType token of
-        Var -> parseOne >> varDeclaration
-        Fun -> parseOne >> funDeclaration "function"
+        Var -> parseOne *> varDeclaration
+        Fun -> parseOne *> funDeclaration "function"
         _   -> statement
 
 varDeclaration :: Parser Stmt
 varDeclaration = do
     identifier <- match [Identifier] "Expect variable name."
     next       <- peek
-    case tokenType next of
-        Equal -> StmtVar identifier . Just <$> expression
-        _     -> StmtVar identifier Nothing
-            <$ consume Semicolon "Expect ';' after variable declaration."
+    value      <- case tokenType next of
+        Equal -> parseOne *> (Just <$> expression)
+        _     -> pure Nothing
+    consume Semicolon "Expect ';' after variable declaration."
+    pure $ StmtVar identifier value
 
 funDeclaration :: String -> Parser Stmt
 funDeclaration kind = do
     identifier <- match [Identifier] $ "Expect " <> kind <> " name."
     consume LeftParen $ "Expect '(' after " <> kind <> " name."
-    params <- parameters kind
+    params <- parameters
     consume LeftBrace $ "Expect '{' before " <> kind <> " body."
     StmtFunction identifier params <$> block
 
-parameters :: String -> Parser [Token]
-parameters kind = do
-    consume LeftParen $ "Expect '(' after " <> kind <> " name."
-    go
-  where
-    go = do
-        next <- parseOne
-        case tokenType next of
-            RightParen -> pure []
-            Identifier -> do
-                afterIdent <- parseOne
-                case tokenType afterIdent of
-                    Comma -> do
-                        params <- go
-                        when (length params >= 255) $ do
-                            n <- peek
-                            logError (Just n)
-                                     "Can't have more than 255 parameters."
-                        pure $ next : params
-                    RightParen -> pure [next]
-                    _          -> throwError (Just afterIdent)
-                                             "Expect ')' after parameters."
-            _ -> throwError (Just next) "Expect ')' or parameter."
+parameters :: Parser [Token]
+parameters = do
+    next <- parseOne
+    case tokenType next of
+        RightParen -> pure []
+        Identifier -> do
+            afterIdent <- parseOne
+            case tokenType afterIdent of
+                Comma -> do
+                    params <- parameters
+                    when (length params >= 255) $ do
+                        n <- peek
+                        logError (Just n) "Can't have more than 255 parameters."
+                    pure $ next : params
+                RightParen -> pure [next]
+                _          -> throwError (Just afterIdent)
+                                         "Expect ')' after parameters."
+        _ -> throwError (Just next) "Expect ')' or parameter."
 
 statement :: Parser Stmt
 statement = do
@@ -138,7 +136,7 @@ block = StmtBlock <$> go
         next <- peek
         case tokenType next of
             Eof        -> throwError (Just next) "Expect '}' after block."
-            RightBrace -> pure []
+            RightBrace -> parseOne $> []
             _          -> do
                 decl  <- declaration
                 decls <- go
@@ -149,30 +147,92 @@ returnStatement = do
     ret  <- parseOne
     next <- peek
     case tokenType next of
-        Semicolon -> pure $ StmtReturn ret Nothing
-        _         -> StmtReturn ret . Just <$> expression
-
+        Semicolon -> parseOne $> StmtReturn ret Nothing
+        _         -> do
+            expr <- expression
+                <* consume Semicolon "Expect ';' after return statement."
+            pure . StmtReturn ret $ Just expr
 
 ifStatement :: Parser Stmt
-ifStatement = undefined
+ifStatement = do
+    consume LeftParen "Expect '(' after 'if'."
+    condition <- expression
+    consume RightParen "Expect ')' after if condition."
+    thenBranch <- statement
+    next       <- peek
+    elseBranch <- case tokenType next of
+        Else -> parseOne *> (Just <$> statement)
+        _    -> pure Nothing
+    pure $ StmtIf condition thenBranch elseBranch
 
 whileStatement :: Parser Stmt
-whileStatement = undefined
+whileStatement = do
+    consume LeftParen "Expect '(' after 'while'."
+    condition <- expression
+    consume RightParen "Expect ')' after while condition."
+    StmtWhile condition <$> statement
 
 forStatement :: Parser Stmt
-forStatement = undefined
+forStatement = do
+    consume LeftParen "Expect '(' after 'for'."
+
+    initPeek    <- peek
+    initializer <- case tokenType initPeek of
+        Semicolon -> pure Nothing
+        Var       -> parseOne *> (Just <$> varDeclaration)
+        _         -> Just <$> expressionStatement
+    condPeek  <- peek
+    condition <- case tokenType condPeek of
+        Semicolon -> pure Nothing
+        _         -> Just <$> expression <* consume
+            Semicolon
+            "Expect ';' after loop condition."
+    incPeek   <- peek
+    increment <- case tokenType incPeek of
+        RightParen -> pure Nothing
+        _ -> Just <$> expression <* consume RightParen
+                                            "Expect ')' after for clauses."
+
+    body <- statement
+
+    let incBody = case increment of
+            Nothing  -> body
+            Just inc -> StmtBlock [body, StmtExpression inc]
+        condBody = case condition of
+            Nothing   -> StmtWhile (ExprLiteral (LiteralBool True)) incBody
+            Just cond -> StmtWhile cond incBody
+
+    pure $ case initializer of
+        Nothing      -> condBody
+        Just initial -> StmtBlock [initial, condBody]
+
 
 printStatement :: Parser Stmt
-printStatement = undefined
+printStatement = do
+    value <- expression <* consume Semicolon "Expect ';' after value."
+    pure $ StmtPrint value
 
 expressionStatement :: Parser Stmt
-expressionStatement = undefined
+expressionStatement = do
+    expr <- expression <* consume Semicolon "Expect ';' after expression."
+    pure $ StmtExpression expr
 
 expression :: Parser Expr
-expression = equality --assignment
+expression = assignment
 
 assignment :: Parser Expr
-assignment = undefined
+assignment = do
+    expr <- logicOr
+    next <- peek
+    case tokenType next of
+        Equal -> do
+            value <- parseOne *> assignment
+            case expr of
+                ExprVariable v -> pure $ ExprAssign v value
+                _              -> do
+                    logError (Just next) "Invalid assignment target"
+                    pure expr
+        _ -> pure expr
 
 unary :: Parser Expr
 unary = do
@@ -184,37 +244,39 @@ unary = do
 
 call :: Parser Expr
 call = do
-    primary >>= go
+    expr <- primary
+    next <- peek
+    case tokenType next of
+        LeftParen -> do
+            args <- parseOne *> arguments
+            go $ ExprCall expr next args
+        _ -> pure expr
   where
     go expr = do
         next <- peek
         case tokenType next of
             LeftParen -> do
-                args <- arguments
+                args <- parseOne *> arguments
                 go $ ExprCall expr next args
             _ -> pure expr
 
 arguments :: Parser [Expr]
-arguments = go
-  where
-    go = do
-        next <- peek
-        case tokenType next of
-            RightParen -> pure []
-            _          -> do
-                arg        <- expression
-                afterIdent <- parseOne
-                case tokenType afterIdent of
-                    Comma -> do
-                        args <- go
-                        when (length args >= 255) $ do
-                            n <- peek
-                            logError (Just n)
-                                     "Can't have more than 255 arguments."
-                        pure $ arg : args
-                    RightParen -> pure [arg]
-                    _          -> throwError (Just afterIdent)
-                                             "Expect ')' after arguments."
+arguments = do
+    next <- peek
+    case tokenType next of
+        RightParen -> parseOne $> []
+        _          -> do
+            arg        <- expression
+            afterIdent <- parseOne
+            case tokenType afterIdent of
+                Comma -> do
+                    args <- arguments
+                    when (length args >= 255) $ do
+                        n <- peek
+                        logError (Just n) "Can't have more than 255 arguments."
+                    pure $ arg : args
+                RightParen -> pure [arg]
+                _ -> throwError (Just afterIdent) "Expect ')' after arguments."
 
 bin
     :: (Expr -> (Token, op) -> Expr -> Expr)
@@ -271,7 +333,7 @@ primary = do
         Token { tokenType = LeftParen } ->
             ExprGrouping <$> expression <* consume
                 RightParen
-                "Expect '' after expression."
+                "Expect ')' after expression."
         _ -> throwError (Just token) "Expect expression."
 
 peek :: Parser Token

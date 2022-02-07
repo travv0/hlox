@@ -2,7 +2,13 @@ module Main where
 
 import           Control.Monad.Catch            ( catchIf )
 import           Data.Foldable                  ( for_ )
-import Scanner ( scan, reportScanError )
+import           Interpreter                    ( interpret )
+import           Parser                         ( parse
+                                                , reportParseError
+                                                )
+import           Scanner                        ( reportScanError
+                                                , scan
+                                                )
 import           System.Environment             ( getArgs )
 import           System.Exit                    ( ExitCode(..)
                                                 , exitWith
@@ -13,8 +19,6 @@ import           System.IO                      ( hFlush
                                                 , stdout
                                                 )
 import           System.IO.Error                ( isEOFError )
-import Parser (parse, reportParseError)
-import Interpreter (interpret)
 
 main :: IO ()
 main = do
@@ -32,14 +36,15 @@ run source = do
     for_ scanErrors reportScanError
 
     case parse tokens of
-      Left errors -> do
-        for_ errors reportParseError
-        pure $ ExitFailure 65
-      Right ast -> do
-        interpret ast
-        if not (null scanErrors)
-            then pure $ ExitFailure 65
-            else pure ExitSuccess
+        Left errors -> do
+            for_ errors reportParseError
+            pure $ ExitFailure 65
+        Right ast -> do
+            print ast
+            -- interpret ast
+            if not (null scanErrors)
+                then pure $ ExitFailure 65
+                else pure ExitSuccess
 
 runFile :: FilePath -> IO a
 runFile path = do
