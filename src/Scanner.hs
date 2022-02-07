@@ -1,14 +1,14 @@
 module Scanner
     ( scan
+    , reportScanError
     ) where
 
 import           Control.Monad                  ( when )
-import           Control.Monad.State            ( StateT
+import           Control.Monad.State            ( State
                                                 , get
                                                 , gets
-                                                , liftIO
                                                 , modify'
-                                                , runStateT
+                                                , runState
                                                 )
 import           Data.Bifunctor                 ( bimap
                                                 , second
@@ -26,18 +26,29 @@ import           System.IO                      ( hPutStrLn
                                                 )
 import           Token
 
-type Scanner = StateT ScannerState IO
+type Scanner = State ScannerState
 
-data ScannerState = ScannerState
-    { scannerSource  :: String
-    , scannerLine    :: Int
-    , scannerTokens  :: [Token]
-    , scannerErrored :: Bool
+data ScanError = ScanError
+    { scanErrorLine    :: Int
+    , scanErrorMessage :: String
     }
     deriving Show
 
-scan :: String -> IO ([Token], Bool)
-scan input = second scannerErrored <$> runStateT scanTokens (make input)
+data ScannerState = ScannerState
+    { scannerSource :: String
+    , scannerLine   :: Int
+    , scannerTokens :: [Token]
+    , scannerErrors :: [ScanError]
+    }
+    deriving Show
+
+scan :: String -> ([Token], [ScanError])
+scan = second (reverse . scannerErrors) . runState scanTokens . make
+
+reportScanError :: ScanError -> IO ()
+reportScanError ScanError { scanErrorLine = line, scanErrorMessage = message }
+    = hPutStrLn stderr $ "[line " <> show line <> "] Error: " <> message
+
 
 scanTokens :: Scanner [Token]
 scanTokens = do
@@ -68,16 +79,21 @@ keywords = Map.fromList
     ]
 
 make :: String -> ScannerState
-make source = ScannerState { scannerSource  = source
-                           , scannerLine    = 1
-                           , scannerTokens  = []
-                           , scannerErrored = False
+make source = ScannerState { scannerSource = source
+                           , scannerLine   = 1
+                           , scannerTokens = []
+                           , scannerErrors = []
                            }
 
-reportError :: Int -> String -> Scanner ()
-reportError line message = do
-    liftIO $ hPutStrLn stderr $ "[line " <> show line <> "] Error: " <> message
-    modify' (\s -> s { scannerErrored = True })
+scanError :: Int -> String -> Scanner ()
+scanError line message = do
+    modify'
+        (\s -> s
+            { scannerErrors =
+                ScanError { scanErrorLine = line, scanErrorMessage = message }
+                    : scannerErrors s
+            }
+        )
 
 addToken :: TokenType -> String -> Int -> Scanner ()
 addToken token lexeme line = do
@@ -137,7 +153,7 @@ consume :: Char -> String -> Scanner ()
 consume char message = do
     line <- gets scannerLine
     c    <- scanOne
-    when (c /= Just char) $ reportError line message
+    when (c /= Just char) $ scanError line message
 
 scanNumber :: Char -> Scanner ()
 scanNumber first = do
@@ -146,7 +162,7 @@ scanNumber first = do
     source <- gets scannerSource
     number <- case source of
         '.' : c : _ | isDigit c -> do
-            consume '.' "Expected '.' in number."
+            consume '.' "Failed to consume '.' in number."
             cs <- scanWhile isDigit
             return $ num ++ '.' : cs
         _ -> return num
@@ -155,7 +171,7 @@ scanNumber first = do
 scanString :: Scanner ()
 scanString = do
     line <- gets scannerLine
-    str  <- scanWhile (/= '"') <* consume '"' "Expected \" at end of string"
+    str  <- scanWhile (/= '"') <* consume '"' "Unterminated string."
     addToken (String str) str line
 
 comment :: Scanner ()
@@ -199,6 +215,5 @@ scanToken = do
         (Just d, _) | isDigit d             -> scanNumber d
         (Just a, _) | isAlpha a || a == '_' -> scanIdentifier a
 
-        (Just u, _) ->
-            reportError line $ "Unexpected character: '" <> [u] <> "'"
-        (Nothing, _) -> error "Unexpected end of file"
+        (Just u, _) -> scanError line $ "Unexpected character: '" <> [u] <> "'"
+        (Nothing, _)                        -> error "Unexpected end of file"
