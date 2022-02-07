@@ -49,7 +49,6 @@ reportScanError :: ScanError -> IO ()
 reportScanError ScanError { scanErrorLine = line, scanErrorMessage = message }
     = hPutStrLn stderr $ "[line " <> show line <> "] Error: " <> message
 
-
 scanTokens :: Scanner [Token]
 scanTokens = do
     ScannerState { scannerSource = source, scannerTokens = tokens, scannerLine = line } <-
@@ -146,8 +145,8 @@ scanIdentifier :: Char -> Scanner ()
 scanIdentifier first = do
     line  <- gets scannerLine
     ident <- (first :) <$> scanWhile (\c -> c == '_' || isAlphaNum c)
-    let typ = fromMaybe Identifier (Map.lookup ident keywords)
-    addToken typ ident line
+    let type_ = fromMaybe Identifier (Map.lookup ident keywords)
+    addToken type_ ident line
 
 consume :: Char -> String -> Scanner ()
 consume char message = do
