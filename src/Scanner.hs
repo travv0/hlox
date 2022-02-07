@@ -183,33 +183,37 @@ scanToken = do
     c      <- scanOne
     source <- gets scannerSource
     case (c, source) of
-        (Just c1@'(', _         )           -> addToken LeftParen [c1] line
-        (Just c1@')', _         )           -> addToken RightParen [c1] line
-        (Just c1@'{', _         )           -> addToken LeftBrace [c1] line
-        (Just c1@'}', _         )           -> addToken RightBrace [c1] line
-        (Just c1@',', _         )           -> addToken Comma [c1] line
-        (Just c1@'.', _         )           -> addToken Dot [c1] line
-        (Just c1@'-', _         )           -> addToken Minus [c1] line
-        (Just c1@'+', _         )           -> addToken Plus [c1] line
-        (Just c1@';', _         )           -> addToken Semicolon [c1] line
-        (Just c1@'*', _         )           -> addToken Star [c1] line
-        (Just c1@'!', c2@'=' : _)           -> addToken BangEqual [c1, c2] line
-        (Just c1@'!', _         )           -> addToken Bang [c1] line
-        (Just c1@'=', c2@'=' : _)           -> addToken EqualEqual [c1, c2] line
-        (Just c1@'=', _         )           -> addToken Equal [c1] line
-        (Just c1@'<', c2@'=' : _)           -> addToken LessEqual [c1, c2] line
-        (Just c1@'<', _         )           -> addToken Less [c1] line
-        (Just c1@'>', c2@'=' : _) -> addToken GreaterEqual [c1, c2] line
-        (Just c1@'>', _         )           -> addToken Greater [c1] line
-        (Just '/'   , '/' : _   )           -> comment
-        (Just c1@'/', _         )           -> addToken Slash [c1] line
+        (Just c1@'(', _) -> addToken LeftParen [c1] line
+        (Just c1@')', _) -> addToken RightParen [c1] line
+        (Just c1@'{', _) -> addToken LeftBrace [c1] line
+        (Just c1@'}', _) -> addToken RightBrace [c1] line
+        (Just c1@',', _) -> addToken Comma [c1] line
+        (Just c1@'.', _) -> addToken Dot [c1] line
+        (Just c1@'-', _) -> addToken Minus [c1] line
+        (Just c1@'+', _) -> addToken Plus [c1] line
+        (Just c1@';', _) -> addToken Semicolon [c1] line
+        (Just c1@'*', _) -> addToken Star [c1] line
+        (Just c1@'!', c2@'=' : _) ->
+            scanOne *> addToken BangEqual [c1, c2] line
+        (Just c1@'!', _) -> addToken Bang [c1] line
+        (Just c1@'=', c2@'=' : _) ->
+            scanOne *> addToken EqualEqual [c1, c2] line
+        (Just c1@'=', _) -> addToken Equal [c1] line
+        (Just c1@'<', c2@'=' : _) ->
+            scanOne *> addToken LessEqual [c1, c2] line
+        (Just c1@'<', _) -> addToken Less [c1] line
+        (Just c1@'>', c2@'=' : _) ->
+            scanOne *> addToken GreaterEqual [c1, c2] line
+        (Just c1@'>', _      )              -> addToken Greater [c1] line
+        (Just '/'   , '/' : _)              -> comment
+        (Just c1@'/', _      )              -> addToken Slash [c1] line
 
-        (Just ' '   , _         )           -> pure ()
-        (Just '\r'  , _         )           -> pure ()
-        (Just '\t'  , _         )           -> pure ()
-        (Just '\n'  , _         )           -> pure ()
+        (Just ' '   , _      )              -> pure ()
+        (Just '\r'  , _      )              -> pure ()
+        (Just '\t'  , _      )              -> pure ()
+        (Just '\n'  , _      )              -> pure ()
 
-        (Just '"'   , _         )           -> scanString
+        (Just '"'   , _      )              -> scanString
 
         (Just d, _) | isDigit d             -> scanNumber d
         (Just a, _) | isAlpha a || a == '_' -> scanIdentifier a

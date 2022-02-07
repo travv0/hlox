@@ -75,10 +75,11 @@ data Expr
 
 data Stmt
     = StmtExpression Expr
-    | StmtFunction Token [Token] [Stmt]
+    | StmtFunction Token [Token] Stmt
     | StmtIf Expr Stmt (Maybe Stmt)
     | StmtPrint Expr
-    | Stmtpure Token (Maybe Expr)
+    | StmtReturn Token (Maybe Expr)
     | StmtVar Token (Maybe Expr)
     | StmtWhile Expr Stmt
+    | StmtBlock [Stmt]
     deriving (Show)
