@@ -85,6 +85,9 @@ interpret statements = do
         (do
             defineGlobal "clock" clock
             traverse_ execute statements
+                `catch` \(ReturnExn Token { tokenLine } _) -> throwError
+                            "Can't return from top-level code."
+                            tokenLine
             errors <- gets interpreterErrors
             unless (null errors) $ lift $ throwE errors
         )
@@ -99,7 +102,8 @@ runInterpreter interpreter env = runExceptT $ evalStateT
     interpreter
     (InterpreterState { interpreterErrors = [], interpreterEnv = env })
 
-newtype ReturnExn = ReturnExn Literal deriving Show
+data ReturnExn = ReturnExn Token Literal
+    deriving Show
 
 instance Exception ReturnExn
 
@@ -126,7 +130,7 @@ execute (StmtFunction token params body) = do
         result <- runInterpreter
             (do
                 zipWithM_ defineVar params args
-                (execute body $> LiteralNil) `catch` \(ReturnExn v) -> pure v
+                (execute body $> LiteralNil) `catch` \(ReturnExn _ v) -> pure v
             )
             newEnv
         case result of
@@ -138,11 +142,11 @@ execute (StmtIf cond thenBranch Nothing) = do
 execute (StmtIf cond thenBranch (Just elseBranch)) = do
     c <- evaluate cond
     if isTruthy c then execute thenBranch else execute elseBranch
-execute (StmtReturn (Just expr)) = do
+execute (StmtReturn ret (Just expr)) = do
     value <- evaluate expr
-    throw (ReturnExn value)
-execute (StmtReturn Nothing) = do
-    throw (ReturnExn LiteralNil)
+    throw (ReturnExn ret value)
+execute (StmtReturn ret Nothing) = do
+    throw (ReturnExn ret LiteralNil)
 execute (StmtVar token (Just expr)) = do
     value <- evaluate expr
     defineVar token value
@@ -326,7 +330,8 @@ popEnv :: Interpreter ()
 popEnv = modify' (\s -> s { interpreterEnv = tail $ interpreterEnv s })
 
 defineVar :: Token -> Literal -> Interpreter ()
-defineVar Token { tokenLexeme } value = do
+defineVar Token { tokenLexeme, tokenLine } value = do
+    errorIfNonGlobalRedef
     valueRef <- liftIO $ newIORef value
     modify'
         (\s ->
@@ -336,6 +341,13 @@ defineVar Token { tokenLexeme } value = do
                                            : envs
                     }
         )
+  where
+    errorIfNonGlobalRedef :: Interpreter ()
+    errorIfNonGlobalRedef = do
+        env <- gets interpreterEnv
+        when (length env > 1 && Map.member tokenLexeme (head env)) $ throwError
+            ("Already a variable named '" <> tokenLexeme <> "' in this scope.")
+            tokenLine
 
 getVar :: Token -> Interpreter Literal
 getVar Token { tokenLexeme, tokenLine } = do

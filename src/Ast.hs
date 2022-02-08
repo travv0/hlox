@@ -91,7 +91,7 @@ data Stmt
     | StmtFunction Token [Token] Stmt
     | StmtIf Expr Stmt (Maybe Stmt)
     | StmtPrint Expr
-    | StmtReturn (Maybe Expr)
+    | StmtReturn Token (Maybe Expr)
     | StmtVar Token (Maybe Expr)
     | StmtWhile Expr Stmt
     | StmtBlock [Stmt]

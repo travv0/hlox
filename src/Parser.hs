@@ -149,11 +149,11 @@ returnStatement :: Parser Stmt
 returnStatement = do
     next <- peek
     case tokenType next of
-        Semicolon -> parseOne $> StmtReturn Nothing
+        Semicolon -> parseOne $> StmtReturn next Nothing
         _         -> do
             expr <- expression
                 <* consume Semicolon "Expect ';' after return statement."
-            pure . StmtReturn $ Just expr
+            pure . StmtReturn next $ Just expr
 
 ifStatement :: Parser Stmt
 ifStatement = do
