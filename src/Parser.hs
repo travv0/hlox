@@ -79,9 +79,10 @@ declaration :: Parser Stmt
 declaration = do
     token <- peek
     case tokenType token of
-        Var -> parseOne *> varDeclaration
-        Fun -> parseOne *> funDeclaration "function"
-        _   -> statement
+        Var   -> parseOne *> varDeclaration
+        Class -> parseOne *> classDeclaration
+        Fun   -> parseOne *> (StmtFunction <$> funDeclaration "function")
+        _     -> statement
 
 varDeclaration :: Parser Stmt
 varDeclaration = do
@@ -93,13 +94,29 @@ varDeclaration = do
     consume Semicolon "Expect ';' after variable declaration."
     pure $ StmtVar identifier value
 
-funDeclaration :: Text -> Parser Stmt
+classDeclaration :: Parser Stmt
+classDeclaration = do
+    name <- match [Identifier] "Expect class name."
+    consume LeftBrace "Expect '{' before class body."
+    mthds <- methods
+    consume RightBrace "Expect '}' after class body."
+    pure $ StmtClass name mthds
+
+methods :: Parser [StmtFun]
+methods = do
+    next <- peek
+    case tokenType next of
+        RightBrace -> pure []
+        Eof        -> pure []
+        _          -> (:) <$> funDeclaration "method" <*> methods
+
+funDeclaration :: Text -> Parser StmtFun
 funDeclaration kind = do
     identifier <- match [Identifier] $ "Expect " <> kind <> " name."
     consume LeftParen $ "Expect '(' after " <> kind <> " name."
     params <- parameters
     consume LeftBrace $ "Expect '{' before " <> kind <> " body."
-    StmtFunction identifier params <$> block
+    StmtFun identifier params <$> block
 
 parameters :: Parser [Token]
 parameters = do

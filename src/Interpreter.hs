@@ -110,7 +110,7 @@ execute (StmtBlock      statements) = do
 execute (StmtPrint expr) = do
     v <- evaluate expr
     liftIO . putStrLn $ prettyLiteral v
-execute (StmtFunction token params body) = do
+execute (StmtFunction (StmtFun token params body)) = do
     defineVar token undefined
     env <- gets interpreterEnv
     _   <- assignVar
@@ -139,20 +139,21 @@ execute (StmtIf cond thenBranch (Just elseBranch)) = do
 execute (StmtReturn ret (Just expr)) = do
     value <- evaluate expr
     throw (ReturnExn ret value)
-execute (StmtReturn ret Nothing) = do
-    throw (ReturnExn ret LiteralNil)
-execute (StmtVar token (Just expr)) = do
+execute (StmtReturn ret   Nothing    ) = throw (ReturnExn ret LiteralNil)
+execute (StmtVar    token (Just expr)) = do
     value <- evaluate expr
     defineVar token value
-execute (StmtVar token Nothing) = do
-    defineVar token LiteralNil
-execute (StmtWhile cond body) = go
-  where
-    go = do
-        c <- evaluate cond
-        when (isTruthy c) $ do
-            execute body
-            go
+execute (     StmtVar   token Nothing) = defineVar token LiteralNil
+execute stmt@(StmtWhile cond  body   ) = do
+    c <- evaluate cond
+    when (isTruthy c) $ do
+        execute body
+        execute stmt
+execute (StmtClass token methods) = do
+    defineVar token undefined
+    env <- gets interpreterEnv
+    _   <- assignVar token (LiteralClass (LoxClass (tokenLexeme token) env))
+    pure ()
 
 clock :: Text -> Interpreter Literal
 clock name = do
@@ -298,6 +299,7 @@ call Token { tokenLine } (LiteralFunction _ arity _ _) args = throwError
     <> "."
     )
     tokenLine
+call _ (LiteralClass klass) args = pure $ LiteralInstance klass
 call Token { tokenLine } literal _ = typeError "function" literal tokenLine
 
 defineGlobal :: Text -> (Text -> Interpreter Literal) -> Interpreter ()

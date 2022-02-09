@@ -1,112 +1,13 @@
-var start = clock();
-
-var a = "global a";
-var b = "global b";
-var c = "global c";
-{
-  var a = "outer a";
-  var d = "outer d";
-  {
-    var a = "inner a";
-    var d = "inner d";
-    print a;
-    print b;
-    if (c == "inner c")
-        print c;
-    if (d == "inner d")
-        print d;
+class Breakfast {
+  cook() {
+    print "Eggs a-fryin'!";
   }
-  print a;
-  print b;
-  print c;
-  print d;
-}
-print a;
-print b;
-print c;
-if (false) {
-    print d;
-}
 
-print "";
-
-var i = 0;
-while (i < 10) {
-    print i;
-    i = i + 1;
-}
-
-print "";
-
-var a = 0;
-var temp;
-
-for (var b = 1; a < 10000; b = temp + b) {
-  print a;
-  temp = a;
-  a = b;
-}
-
-print "";
-
-fun count(n) {
-  if (n > 1) count(n - 1);
-  print n;
-}
-
-count(3);
-
-print "";
-
-fun weirdCount(n) {
-  while (n < 100) {
-    if (n == 3) return n;
-    print n;
-    n = n + 1;
+  serve(who) {
+    print "Enjoy your breakfast, " + who + ".";
   }
 }
 
-print weirdCount(1);
+print Breakfast; // print class
 
-print "";
-
-fun fib(n) {
-  if (n <= 1) return n;
-  return fib(n - 2) + fib(n - 1);
-}
-
-for (var i = 0; i < 20; i = i + 1) {
-  print fib(i);
-}
-
-print "";
-
-fun makeCounter() {
-  var i = 0;
-  fun count() {
-    i = i + 1;
-    print i;
-  }
-
-  return count;
-}
-
-var counter = makeCounter();
-counter();
-counter();
-
-print "";
-
-var a = "global";
-{
-  fun showA() {
-    print a;
-  }
-
-  showA();
-  var a = "block";
-  showA();
-}
-
-print "";
-print clock() - start;
+print Breakfast(); // print instance of class

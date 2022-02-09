@@ -44,6 +44,7 @@ main = do
         _                  -> do
             liftIO $ hPutStrLn stderr "Usage: hlox [[--ast|--tokens] script]"
             liftIO $ exitWith $ ExitFailure 64
+
 run :: RunMode -> String -> Interpreter ExitCode
 run runMode source = do
     let (tokens, scanErrors) = scan source
