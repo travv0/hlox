@@ -53,19 +53,20 @@ run runMode source = do
     if runMode == Tokens
         then if null scanErrors
             then liftIO $ print tokens $> ExitSuccess
-            else pure $ ExitFailure 65
+            else exitError
         else case parse tokens of
             Left errors -> do
                 liftIO $ for_ errors reportParseError
-                pure $ ExitFailure 65
+                exitError
             Right ast -> do
                 if runMode == Ast
                     then liftIO $ print ast $> ExitSuccess
                     else do
                         interpret ast
                         if not (null scanErrors)
-                            then pure $ ExitFailure 65
+                            then exitError
                             else pure ExitSuccess
+    where exitError = pure $ ExitFailure 65
 
 runFile :: RunMode -> FilePath -> IO ()
 runFile runMode path = do
