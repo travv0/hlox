@@ -3,6 +3,9 @@
 
 module Interpreter
     ( interpret
+    , Interpreter
+    , runInterpreter
+    , reportInterpretError
     ) where
 
 import           Ast
@@ -79,22 +82,13 @@ reportInterpretError (InterpretTypeError TypeError { typeErrorExpected, typeErro
 reportInterpretError (InterpretOtherError message line) =
     hPutStrLn stderr $ "[line " <> T.pack (show line) <> "] " <> message
 
-interpret :: [Stmt] -> IO ()
+interpret :: [Stmt] -> Interpreter ()
 interpret statements = do
-    result <- runInterpreter
-        (do
-            defineGlobal "clock" clock
-            traverse_ execute statements
-                `catch` \(ReturnExn Token { tokenLine } _) -> throwError
-                            "Can't return from top-level code."
-                            tokenLine
-            errors <- gets interpreterErrors
-            unless (null errors) $ lift $ throwE errors
-        )
-        [Map.empty]
-    case result of
-        Right _    -> pure ()
-        Left  errs -> for_ errs reportInterpretError
+    defineGlobal "clock" clock
+    traverse_ execute statements `catch` \(ReturnExn Token { tokenLine } _) ->
+        throwError "Can't return from top-level code." tokenLine
+    errors <- gets interpreterErrors
+    unless (null errors) $ lift $ throwE errors
 
 runInterpreter
     :: Interpreter a -> Environment -> IO (Either [InterpretError] a)

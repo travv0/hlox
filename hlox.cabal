@@ -51,8 +51,10 @@ executable hlox
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
+    default-extensions: OverloadedStrings, LambdaCase, NamedFieldPuns
     build-depends:
         base ^>=4.14.3.0
+      , containers
       , hlox
       , exceptions
     hs-source-dirs:   app
