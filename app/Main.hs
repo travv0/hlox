@@ -36,23 +36,14 @@ data RunMode
 main :: IO ()
 main = do
     args <- getArgs
-    runInterpreter
-            (case args of
-                []                 -> runPrompt
-                [file]             -> runFile Interpret file
-                ["--ast"   , file] -> runFile Ast file
-                ["--tokens", file] -> runFile Tokens file
-                _                  -> do
-                    liftIO $ hPutStrLn
-                        stderr
-                        "Usage: hlox [[--ast|--tokens] script]"
-                    liftIO $ exitWith $ ExitFailure 64
-            )
-            [Map.empty]
-        >>= \case
-                Right _    -> pure ()
-                Left  errs -> for_ errs reportInterpretError
-
+    case args of
+        []                 -> runPrompt
+        [file]             -> runFile Interpret file
+        ["--ast"   , file] -> runFile Ast file
+        ["--tokens", file] -> runFile Tokens file
+        _                  -> do
+            liftIO $ hPutStrLn stderr "Usage: hlox [[--ast|--tokens] script]"
+            liftIO $ exitWith $ ExitFailure 64
 run :: RunMode -> String -> Interpreter ExitCode
 run runMode source = do
     let (tokens, scanErrors) = scan source
@@ -75,17 +66,28 @@ run runMode source = do
                             then pure $ ExitFailure 65
                             else pure ExitSuccess
 
-runFile :: RunMode -> FilePath -> Interpreter a
+runFile :: RunMode -> FilePath -> IO ()
 runFile runMode path = do
-    liftIO (readFile path) >>= run runMode >>= liftIO . exitWith
+    runInterpreter
+            (liftIO (readFile path) >>= run runMode >>= liftIO . exitWith)
+            [Map.empty]
+        >>= \case
+                Right _    -> pure ()
+                Left  errs -> for_ errs reportInterpretError
 
 getLineMaybe :: IO (Maybe String)
 getLineMaybe = catchIf isEOFError (Just <$> getLine) (const (pure Nothing))
 
-runPrompt :: Interpreter ()
-runPrompt = do
-    liftIO $ putStr "> " *> hFlush stdout
-    mline <- liftIO getLineMaybe
-    case mline of
-        Just line -> run Interpret line *> runPrompt
-        Nothing   -> pure ()
+runPrompt :: IO ()
+runPrompt = runInterpreter go [Map.empty] >>= \case
+    Right _    -> runPrompt
+    Left  errs -> do
+        for_ errs reportInterpretError
+        runPrompt
+  where
+    go = do
+        liftIO $ putStr "> " *> hFlush stdout
+        mline <- liftIO getLineMaybe
+        case mline of
+            Just line -> run Interpret line *> go
+            Nothing   -> pure ()
