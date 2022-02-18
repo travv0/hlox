@@ -26,7 +26,8 @@ library
         src
     ghc-options: -Wall
     exposed-modules:
-        Ast
+        Analyzer
+      , Ast
       , Interpreter
       , Parser
       , Scanner

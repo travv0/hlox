@@ -1,5 +1,8 @@
 module Main where
 
+import           Analyzer                       ( analyze
+                                                , reportAnalysisError
+                                                )
 import           Control.Monad.Catch            ( catchIf )
 import           Control.Monad.IO.Class         ( liftIO )
 import           Data.Foldable                  ( for_ )
@@ -61,11 +64,15 @@ run runMode source = do
             Right ast -> do
                 if runMode == Ast
                     then liftIO $ print ast $> ExitSuccess
-                    else do
-                        interpret ast
-                        if not (null scanErrors)
-                            then exitError
-                            else pure ExitSuccess
+                    else case analyze ast of
+                        [] -> do
+                            interpret ast
+                            if not (null scanErrors)
+                                then exitError
+                                else pure ExitSuccess
+                        errs -> do
+                            liftIO $ for_ errs reportAnalysisError
+                            exitError
     where exitError = pure $ ExitFailure 65
 
 runFile :: RunMode -> FilePath -> IO ()

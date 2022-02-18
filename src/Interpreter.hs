@@ -86,8 +86,7 @@ reportInterpretError (InterpretOtherError message line) =
 interpret :: [Stmt] -> Interpreter ()
 interpret statements = do
     defineGlobal "clock" clock
-    traverse_ execute statements `catch` \(ReturnExn Token { tokenLine } _) ->
-        throwError "Can't return from top-level code." tokenLine
+    traverse_ execute statements
     errors <- gets interpreterErrors
     unless (null errors) $ lift $ throwE errors
 
@@ -445,8 +444,7 @@ popEnv :: Interpreter ()
 popEnv = modify' (\s -> s { interpreterEnv = tail $ interpreterEnv s })
 
 defineVar :: Token -> Literal -> Interpreter ()
-defineVar Token { tokenLexeme, tokenLine } value = do
-    errorIfNonGlobalRedef
+defineVar Token { tokenLexeme } value = do
     valueRef <- liftIO $ newIORef value
     modify'
         (\s ->
@@ -456,13 +454,6 @@ defineVar Token { tokenLexeme, tokenLine } value = do
                                            : envs
                     }
         )
-  where
-    errorIfNonGlobalRedef :: Interpreter ()
-    errorIfNonGlobalRedef = do
-        env <- gets interpreterEnv
-        when (length env > 1 && Map.member tokenLexeme (head env)) $ throwError
-            ("Already a variable named '" <> tokenLexeme <> "' in this scope.")
-            tokenLine
 
 getVar :: Token -> Interpreter Literal
 getVar token = do
