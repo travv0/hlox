@@ -32,7 +32,8 @@ import           Data.Foldable                  ( for_
                                                 , traverse_
                                                 )
 import           Data.Functor                   ( ($>) )
-import           Data.IORef                     ( newIORef
+import           Data.IORef                     ( modifyIORef'
+                                                , newIORef
                                                 , readIORef
                                                 , writeIORef
                                                 )
@@ -115,21 +116,12 @@ execute (StmtFunction (StmtFun token params body)) = do
     env <- gets interpreterEnv
     _   <- assignVar
         token
-        (LiteralFunction (tokenLexeme token) (length params) env callFn)
-    pure ()
-  where
-    callFn :: [Literal] -> Environment -> IO Literal
-    callFn args env = do
-        let newEnv = Map.empty : env
-        result <- runInterpreter
-            (do
-                zipWithM_ defineVar params args
-                (execute body $> LiteralNil) `catch` \(ReturnExn _ v) -> pure v
+        (LiteralFunction
+            ( LoxFunction (tokenLexeme token) (length params) Function env
+            $ fnWrap params body
             )
-            newEnv
-        case result of
-            Left  errs -> throw errs
-            Right r    -> pure r
+        )
+    pure ()
 execute (StmtIf cond thenBranch Nothing) = do
     c <- evaluate cond
     when (isTruthy c) $ execute thenBranch
@@ -149,20 +141,69 @@ execute stmt@(StmtWhile cond  body   ) = do
     when (isTruthy c) $ do
         execute body
         execute stmt
-execute (StmtClass token methods) = do
-    defineVar token undefined
-    env <- gets interpreterEnv
-    _   <- assignVar token (LiteralClass (LoxClass (tokenLexeme token) env))
-    pure ()
+execute (StmtClass token@Token { tokenLine } sc classMethods) = do
+    case sc of
+        Just (Token { tokenLine = line }, expr) -> evaluate expr >>= \case
+            LiteralClass klass -> go $ Just klass
+            _                  -> throwError "Superclass must be a class." line
+        Nothing -> go Nothing
+  where
+    go superclass = do
+        defineVar token undefined
+        traverse_ defineSuper $ LiteralClass <$> superclass
+        env     <- gets interpreterEnv
+
+        methods <- liftIO $ newIORef Map.empty
+
+        liftIO
+            $ for_ classMethods
+            $ \(StmtFun Token { tokenLexeme } params body) ->
+                  let method =
+                          LoxFunction
+                                  tokenLexeme
+                                  (length params)
+                                  (if tokenLexeme == "init"
+                                      then Initializer
+                                      else Method
+                                  )
+                                  env
+                              $ fnWrap params body
+                  in  modifyIORef' methods $ Map.insert tokenLexeme method
+
+        _ <- assignVar
+            token
+            (LiteralClass (LoxClass (tokenLexeme token) superclass methods env))
+        pure ()
+    defineSuper = do
+        defineVar Token { tokenLexeme = "super"
+                        , tokenType   = Super
+                        , tokenLine   = tokenLine
+                        }
+
+fnWrap :: [Token] -> Stmt -> [Literal] -> Environment -> a -> IO Literal
+fnWrap params body args env _line = do
+    let newEnv = Map.empty : env
+    result <- runInterpreter
+        (do
+            zipWithM_ defineVar params args
+            (execute body $> LiteralNil) `catch` \(ReturnExn _ v) -> pure v
+        )
+        newEnv
+    case result of
+        Left  errs -> throw errs
+        Right r    -> pure r
 
 clock :: Text -> Interpreter Literal
 clock name = do
     env <- gets interpreterEnv
     pure $ LiteralFunction
-        name
-        0
-        env
-        (\[] _ -> LiteralNumber . realToFrac <$> getPOSIXTime)
+        (LoxFunction
+            name
+            0
+            Function
+            env
+            (\[] _ _ -> LiteralNumber . realToFrac <$> getPOSIXTime)
+        )
 
 evaluate :: Expr -> Interpreter Literal
 evaluate (ExprAssign token expr) = do
@@ -251,6 +292,44 @@ evaluate (ExprUnary (_, UnaryBang) right) = do
 evaluate (ExprLiteral  lit  ) = pure lit
 evaluate (ExprVariable token) = getVar token
 evaluate (ExprGrouping e    ) = evaluate e
+evaluate (ExprSuper token Token { tokenLexeme = methodLexeme, tokenLine = methodLine })
+    = do
+        getVar token >>= \case
+            LiteralClass superclass ->
+                findMethod superclass methodLexeme >>= \case
+                    Nothing -> throwError
+                        ("Undefined property '" <> methodLexeme <> "'.")
+                        methodLine
+                    Just fn -> do
+                        obj <-
+                            getVar Token { tokenLexeme = "this"
+                                         , tokenType   = This
+                                         , tokenLine   = methodLine
+                                         }
+                                >>= \o -> bindThis o fn
+                        pure $ LiteralFunction obj
+            _ -> error "Non-class is superclass"
+evaluate (ExprThis token) = getVar token
+evaluate (ExprGet expr Token { tokenLexeme, tokenLine }) = do
+    evaluate expr >>= \case
+        obj@(LiteralInstance _ propsRef) -> do
+            props <- liftIO $ readIORef propsRef
+            case Map.lookup tokenLexeme props of
+                Just v  -> pure v
+                Nothing -> getMethod obj tokenLexeme tokenLine >>= \case
+                    Just fn -> pure $ LiteralFunction fn
+                    Nothing -> throwError
+                        ("No method '" <> tokenLexeme <> "' on object.")
+                        tokenLine
+
+        _ -> throwError "Only instances have fields." tokenLine
+evaluate (ExprSet expr Token { tokenLexeme, tokenLine } valueExpr) =
+    evaluate expr >>= \case
+        LiteralInstance _ propsRef -> do
+            value <- evaluate valueExpr
+            liftIO $ modifyIORef' propsRef (Map.insert tokenLexeme value)
+            pure value
+        _ -> throwError "Only instances have fields." tokenLine
 
 typeError :: Text -> Literal -> Int -> Interpreter a
 typeError expected value line = do
@@ -289,18 +368,58 @@ isTruthy (LiteralBool b) = b
 isTruthy _               = True
 
 call :: Token -> Literal -> [Literal] -> Interpreter Literal
-call _ (LiteralFunction _ arity env fn) args | length args == arity =
-    liftIO $ fn args env
-call Token { tokenLine } (LiteralFunction _ arity _ _) args = throwError
-    (  "Expected "
-    <> T.pack (show arity)
-    <> " arguments but got "
-    <> T.pack (show (length args))
-    <> "."
-    )
-    tokenLine
-call _ (LiteralClass klass) args = pure $ LiteralInstance klass
+call Token { tokenLine } (LiteralFunction (LoxFunction _ arity type_ env fn)) args
+    | length args == arity
+    = case type_ of
+        Initializer -> do
+            _ <- liftIO $ fn args env tokenLine
+            getVar'
+                Token { tokenLexeme = "this"
+                      , tokenType   = This
+                      , tokenLine   = tokenLine
+                      }
+                env
+        _ -> liftIO $ fn args env tokenLine
+call Token { tokenLine } (LiteralFunction (LoxFunction _ arity _ _ _)) args =
+    throwError
+        (  "Expected "
+        <> T.pack (show arity)
+        <> " arguments but got "
+        <> T.pack (show (length args))
+        <> "."
+        )
+        tokenLine
+call Token { tokenLine } (LiteralClass klass) args = do
+    methodsRef <- liftIO $ newIORef Map.empty
+    let inst = LiteralInstance klass methodsRef
+    _ <- getMethod inst "init" tokenLine >>= \case
+        Just (LoxFunction _ _ _ env initializer) ->
+            liftIO $ initializer args env tokenLine
+        Nothing -> pure LiteralNil
+    pure inst
 call Token { tokenLine } literal _ = typeError "function" literal tokenLine
+
+findMethod :: LoxClass -> Text -> Interpreter (Maybe LoxFunction)
+findMethod (LoxClass _ superclass methodsRef _) name = do
+    methods <- liftIO $ readIORef methodsRef
+    case Map.lookup name methods of
+        Just fn -> pure $ Just fn
+        Nothing -> case superclass of
+            Just sc -> findMethod sc name
+            Nothing -> pure Nothing
+
+getMethod :: Literal -> Text -> Int -> Interpreter (Maybe LoxFunction)
+getMethod obj name line = case obj of
+    LiteralInstance klass _ -> findMethod klass name >>= \case
+        Just m  -> Just <$> bindThis obj m
+        Nothing -> pure Nothing
+    _ -> throwError "Only instances have methods." line
+
+bindThis :: Literal -> LoxFunction -> Interpreter LoxFunction
+bindThis obj (LoxFunction fnName arity type_ env fn) = do
+    objRef <- liftIO $ newIORef obj
+    let env' = Map.singleton "this" objRef : env
+    pure $ LoxFunction fnName arity type_ env' fn
 
 defineGlobal :: Text -> (Text -> Interpreter Literal) -> Interpreter ()
 defineGlobal name fn = do
@@ -346,15 +465,17 @@ defineVar Token { tokenLexeme, tokenLine } value = do
             tokenLine
 
 getVar :: Token -> Interpreter Literal
-getVar Token { tokenLexeme, tokenLine } = do
+getVar token = do
     env <- gets interpreterEnv
-    go env
-  where
-    go [] =
-        throwError ("Undefined variable '" <> tokenLexeme <> "'.") tokenLine
-    go (env : envs) = case Map.lookup tokenLexeme env of
+    getVar' token env
+
+getVar' :: Token -> Environment -> Interpreter Literal
+getVar' Token { tokenLexeme, tokenLine } [] =
+    throwError ("Undefined variable '" <> tokenLexeme <> "'.") tokenLine
+getVar' token@Token { tokenLexeme } (env : envs) =
+    case Map.lookup tokenLexeme env of
         Just valueRef -> liftIO $ readIORef valueRef
-        Nothing       -> go envs
+        Nothing       -> getVar' token envs
 
 assignVar :: Token -> Literal -> Interpreter Literal
 assignVar Token { tokenLexeme, tokenLine } value = do

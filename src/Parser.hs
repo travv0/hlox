@@ -96,11 +96,17 @@ varDeclaration = do
 
 classDeclaration :: Parser Stmt
 classDeclaration = do
-    name <- match [Identifier] "Expect class name."
+    name       <- match [Identifier] "Expect class name."
+    next       <- peek
+    superclass <- case tokenType next of
+        Less ->
+            parseOne *> (Just <$> match [Identifier] "Expect superclass name.")
+        _ -> pure Nothing
+    let scNode = fmap (\sc -> (sc, ExprVariable sc)) superclass
     consume LeftBrace "Expect '{' before class body."
     mthds <- methods
     consume RightBrace "Expect '}' after class body."
-    pure $ StmtClass name mthds
+    pure $ StmtClass name scNode mthds
 
 methods :: Parser [StmtFun]
 methods = do
@@ -247,8 +253,9 @@ assignment = do
         Equal -> do
             value <- parseOne *> assignment
             case expr of
-                ExprVariable v -> pure $ ExprAssign v value
-                _              -> do
+                ExprVariable v      -> pure $ ExprAssign v value
+                ExprGet object name -> pure $ ExprSet object name value
+                _                   -> do
                     logError (Just next) "Invalid assignment target"
                     pure expr
         _ -> pure expr
@@ -262,14 +269,7 @@ unary = do
         _     -> call
 
 call :: Parser Expr
-call = do
-    expr <- primary
-    next <- peek
-    case tokenType next of
-        LeftParen -> do
-            args <- parseOne *> arguments
-            go $ ExprCall expr next args
-        _ -> pure expr
+call = primary >>= go
   where
     go expr = do
         next <- peek
@@ -277,6 +277,10 @@ call = do
             LeftParen -> do
                 args <- parseOne *> arguments
                 go $ ExprCall expr next args
+            Dot -> do
+                name <- parseOne
+                    *> match [Identifier] "Expect property name after '.'."
+                go $ ExprGet expr name
             _ -> pure expr
 
 arguments :: Parser [Expr]
@@ -343,11 +347,16 @@ primary :: Parser Expr
 primary = do
     token <- parseOne
     case tokenType token of
-        False_     -> pure . ExprLiteral $ LiteralBool False
-        True_      -> pure . ExprLiteral $ LiteralBool True
-        Nil        -> pure $ ExprLiteral LiteralNil
-        String s   -> pure . ExprLiteral $ LiteralString s
-        Number n   -> pure . ExprLiteral $ LiteralNumber n
+        False_   -> pure . ExprLiteral $ LiteralBool False
+        True_    -> pure . ExprLiteral $ LiteralBool True
+        Nil      -> pure $ ExprLiteral LiteralNil
+        String s -> pure . ExprLiteral $ LiteralString s
+        Number n -> pure . ExprLiteral $ LiteralNumber n
+        Super    -> do
+            consume Dot "Expect '.' after 'super'."
+            method <- match [Identifier] "Expect superclass method name."
+            pure $ ExprSuper token method
+        This       -> pure $ ExprThis token
         Identifier -> pure $ ExprVariable token
         LeftParen  -> ExprGrouping <$> expression <* consume
             RightParen

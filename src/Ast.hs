@@ -9,15 +9,29 @@ import           Token
 
 type Environment = [Map Text (IORef Literal)]
 
-data LoxClass = LoxClass Text Environment
+data LoxClass = LoxClass Text
+                         (Maybe LoxClass)
+                         (IORef (Map Text LoxFunction))
+                         Environment
+
+data FunctionType
+    = Function
+    | Method
+    | Initializer
+
+data LoxFunction = LoxFunction Text
+                               Int
+                               FunctionType
+                               Environment
+                               ([Literal] -> Environment -> Int -> IO Literal)
 
 data Literal
     = LiteralBool Bool
     | LiteralString Text
     | LiteralNumber Double
-    | LiteralFunction Text Int Environment ([Literal] -> Environment -> IO Literal)
+    | LiteralFunction LoxFunction
     | LiteralClass LoxClass
-    | LiteralInstance LoxClass
+    | LiteralInstance LoxClass (IORef (Map Text Literal))
     | LiteralNil
 
 instance Eq Literal where
@@ -35,13 +49,15 @@ prettyLiteral (LiteralNumber n) =
 prettyLiteral l = T.pack $ show l
 
 instance Show Literal where
-    show (LiteralBool   True            ) = "true"
-    show (LiteralBool   False           ) = "false"
-    show (LiteralString s               ) = show s
-    show (LiteralNumber n               ) = show n
-    show (LiteralFunction name _ _ _    ) = "<fn " <> T.unpack name <> ">"
-    show (LiteralClass (LoxClass name _)) = "<class " <> T.unpack name <> ">"
-    show (LiteralInstance (LoxClass name _)) =
+    show (LiteralBool   True ) = "true"
+    show (LiteralBool   False) = "false"
+    show (LiteralString s    ) = show s
+    show (LiteralNumber n    ) = show n
+    show (LiteralFunction (LoxFunction name _ _ _ _)) =
+        "<fn " <> T.unpack name <> ">"
+    show (LiteralClass (LoxClass name _ _ _)) =
+        "<class " <> T.unpack name <> ">"
+    show (LiteralInstance (LoxClass name _ _ _) _) =
         "<instance " <> T.unpack name <> ">"
     show LiteralNil = "nil"
 
@@ -86,7 +102,11 @@ data Expr
     = ExprAssign Token Expr
     | ExprBinary Expr (Token, BinaryOp) Expr
     | ExprCall Expr Token [Expr]
+    | ExprGet Expr Token
     | ExprLogical Expr (Token, LogicalOp) Expr
+    | ExprSet Expr Token Expr
+    | ExprSuper Token Token
+    | ExprThis Token
     | ExprUnary (Token, UnaryOp) Expr
     | ExprLiteral Literal
     | ExprVariable Token
@@ -105,5 +125,5 @@ data Stmt
     | StmtVar Token (Maybe Expr)
     | StmtWhile Expr Stmt
     | StmtBlock [Stmt]
-    | StmtClass Token [StmtFun]
+    | StmtClass Token (Maybe (Token, Expr)) [StmtFun]
     deriving Show

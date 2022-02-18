@@ -1,3 +1,121 @@
+var start = clock();
+
+var a = "global a";
+var b = "global b";
+var c = "global c";
+{
+  var a = "outer a";
+  var d = "outer d";
+  {
+    var a = "inner a";
+    var d = "inner d";
+    print a;
+    print b;
+    if (c == "inner c")
+        print c;
+    if (d == "inner d")
+        print d;
+  }
+  print a;
+  print b;
+  print c;
+  print d;
+}
+print a;
+print b;
+print c;
+if (false) {
+    print d;
+}
+
+print "";
+
+var i = 0;
+while (i < 10) {
+    print i;
+    i = i + 1;
+}
+
+print "";
+
+var a = 0;
+var temp;
+
+for (var b = 1; a < 10000; b = temp + b) {
+  print a;
+  temp = a;
+  a = b;
+}
+
+print "";
+
+fun count(n) {
+  if (n > 1) count(n - 1);
+  print n;
+}
+count(3);
+
+print "";
+
+fun weirdCount(n) {
+  while (n < 100) {
+    if (n == 3) return n;
+    print n;
+    n = n + 1;
+  }
+}
+
+print weirdCount(1);
+
+print "";
+
+fun fib(n) {
+  if (n <= 1) return n;
+  return fib(n - 2) + fib(n - 1);
+}
+
+for (var i = 0; i < 10; i = i + 1) {
+  print fib(i);
+}
+
+print "";
+
+fun makeCounter() {
+  var i = 0;
+  fun count() {
+    i = i + 1;
+    print i;
+  }
+
+  return count;
+}
+
+var counter = makeCounter();
+counter();
+counter();
+
+print "";
+
+var a = "global";
+{
+  fun showA() {
+    print a;
+  }
+
+  showA();
+  var a = "block";
+  showA();
+}
+
+print "";
+print clock() - start;
+
+class Test {
+  init() {
+    print "initializin";
+  }
+}
+
 class Breakfast {
   cook() {
     print "Eggs a-fryin'!";
@@ -8,6 +126,70 @@ class Breakfast {
   }
 }
 
-print Breakfast; // print class
+print Breakfast;
 
-print Breakfast(); // print instance of class
+var breakfast = Breakfast();
+print breakfast;
+
+breakfast.hello = "hello";
+breakfast.world = "world";
+
+print breakfast.hello + " " + breakfast.world;
+
+breakfast.cook();
+breakfast.serve("u");
+
+class Cake {
+  taste() {
+    var adjective = "delicious";
+    print "The " + this.flavor + " cake is " + adjective + "!";
+  }
+}
+
+var cake = Cake();
+cake.flavor = "German chocolate";
+cake.taste(); // Prints "The German chocolate cake is delicious!".
+
+class Foo {
+  init() {
+    print this;
+  }
+}
+
+var foo = Foo();
+print foo.init();
+
+class Doughnut {
+  cook() {
+    print "Fry until golden brown.";
+  }
+}
+
+class BostonCream < Doughnut {
+  cook() {
+    super.cook();
+    print "Pipe full of custard and coat with chocolate.";
+  }
+}
+
+BostonCream().cook();
+
+class A {
+  method() {
+    print "A method";
+  }
+}
+
+class B < A {
+  method() {
+    print "B method";
+  }
+
+  test() {
+    super.method();
+  }
+}
+
+class C < B {}
+
+C().test();
